@@ -9,6 +9,9 @@
 #include "linkedlist.h"
 
 #define MAX_PATH_SIZE	100
+#define KRED "\x1B[31m"
+#define RESET "\x1B[0m"
+#define CYN "\x1B[36m"
 
 /**
  * @breif : -this funtion displays a line of text like echo in the shell  
@@ -97,6 +100,7 @@ char execute_error_redirection(char *error_file);
  *
  */
 char execute_input_redirection(char *input_file);
+char remove_io_redirections(char *string_cmd);
 /**
  * @breif : -this function execute the input Redirections ( < )
  *
@@ -112,6 +116,18 @@ char calculate_num_of_io_redirections(char **parsed_input_string,
 				      char arguments_size,
 				      char *redirections_num,
 				      Node * command_node_ptr);
+/**
+ * @breif : -this function sets enviroment variables
+ *
+ * @parameters : -char **parsed_input_string: it's a pointer to 2-d array of the input command line
+ *
+ * @return :-the function returns 0 if it executed correctly , 1 othewise
+ *
+ */
+
+char my_export(char **parsed_input_string);
+char execute_env_var(Node * cmd_line_data);
+
 int main()
 {
     char *command_line;
@@ -131,7 +147,7 @@ int main()
 	("\n-------------------------- Welcome To My PicoShell --------------------------\n\n");
 
     while (1) {
-	printf(">>>>");
+	printf(CYN "mohamed_shell: " RESET);
 
 	size_input_string = getline(&command_line, &n, stdin);	// get the command line from user
 
@@ -165,7 +181,10 @@ int main()
 		    node_ptr->num_of_redirections;
 		num_of_redirections = node_ptr->num_of_redirections;
 
-		for (int i = 0; i < node_ptr->num_of_arguments+node_ptr->num_of_redirections*2; i++) {
+		for (int i = 0;
+		     i <
+		     node_ptr->num_of_arguments +
+		     node_ptr->num_of_redirections * 2; i++) {
 		    printf("%s ", parsed_input_string[i]);	// print the seleced line
 		}
 		printf("\n");
@@ -181,6 +200,7 @@ int main()
 		    wait(&wstatus);
 		} else if (pid_ret == 0) {
 		    ret = execute_io_redirections(command_line_node_ptr);
+		    ret = execute_env_var(command_line_node_ptr);
 		    //execute the command
 		    if (ret == 0) {
 			Print(&list);
@@ -200,7 +220,7 @@ int main()
 		    wait(&wstatus);
 		} else if (pid_ret == 0) {
 		    ret = execute_io_redirections(command_line_node_ptr);
-
+		    ret = execute_env_var(command_line_node_ptr);
 		    //execute the command
 		    ret = my_echo(command_line_node_ptr);
 		    return ret;
@@ -209,6 +229,7 @@ int main()
 		}
 
 	    } else if ((strcmp(parsed_input_string[0], "cd") == 0)) {
+		ret = execute_env_var(command_line_node_ptr);
 		ret = my_cd(parsed_input_string, arguments_size);
 	    } else if ((strcmp(parsed_input_string[0], "pwd") == 0)) {
 		pid_ret = fork();
@@ -217,22 +238,30 @@ int main()
 		    wait(&wstatus);
 		} else if (pid_ret == 0) {
 		    ret = execute_io_redirections(command_line_node_ptr);
-
+		    ret = execute_env_var(command_line_node_ptr);
 		    //execute the command
 		    ret = my_pwd();
+		    printf("\n");
 		    return ret;
 		} else {
 		    printf("ERROR: I could not get a child\n");
 		}
+	    } else if ((strcmp(parsed_input_string[0], "export") == 0)) {
+		ret = execute_env_var(command_line_node_ptr);
+		ret = my_export(parsed_input_string);
 	    } else {
 		//fork the process to create a chile process to execute the command
 		pid_ret = fork();
 		if (pid_ret > 0) {
-		    //wait the child process to terminate
-		    wait(&wstatus);
+			if (strcmp(parsed_input_string[command_line_node_ptr->num_of_arguments-1],"&")!=0){
+				//wait the child process to terminate
+                    		waitpid(pid_ret,&wstatus,WCONTINUED|WUNTRACED);
+			}else{
+
+			}
 		} else if (pid_ret == 0) {
 		    ret = execute_io_redirections(command_line_node_ptr);
-
+		    ret = execute_env_var(command_line_node_ptr);
 		    //execute the command
 		    execvp(parsed_input_string[0], parsed_input_string);
 		    //if the execvp function executed correctly the program won't return here
@@ -249,6 +278,32 @@ int main()
     }
 
     return 0;
+}
+
+char my_export(char **parsed_input_string)
+{
+    char ret = 1;
+    char variable_name[32] = { 0 };
+    char variable_value[32] = { 0 };
+    char value_index = 0;
+    char equal_flag = 0;
+    if (NULL == parsed_input_string) {
+	ret = 1;
+    } else {
+	for (int i = 0; i < strlen(parsed_input_string[1]); i++) {
+	    if ((parsed_input_string[1][i] != '=') && (equal_flag == 0)) {
+		variable_name[i] = parsed_input_string[1][i];
+	    } else if (parsed_input_string[1][i] == '=') {
+		equal_flag = 1;
+		continue;
+	    }else{
+		variable_value[value_index] = parsed_input_string[1][i];
+		value_index++;
+	    }
+	}
+	ret = setenv(variable_name, variable_value, 1);
+    }
+    return ret;
 }
 
 char execute_error_redirection(char *error_file)
@@ -337,17 +392,18 @@ char calculate_num_of_io_redirections(char **parsed_input_string,
     } else {
 	//compare all the line elemnts with the i/o redirections
 	for (int index = 0; index < arguments_size; index++) {
-	    if ((strcmp(parsed_input_string[index], ">") == 0)) {
+	    if ((strcmp(command_node_ptr->Data[index], ">") == 0)) {
 		(*redirections_num)++;
-	    } else if ((strcmp(parsed_input_string[index], "2>") == 0)) {
+	    } else if ((strcmp(command_node_ptr->Data[index], "2>") == 0)) {
 		(*redirections_num)++;
-	    } else if ((strcmp(parsed_input_string[index], "<") == 0)) {
+	    } else if ((strcmp(command_node_ptr->Data[index], "<") == 0)) {
 		(*redirections_num)++;
 	    } else {
 		continue;
 	    }
 	    command_node_ptr->num_of_redirections = *redirections_num;
-	    command_node_ptr->num_of_arguments-=(command_node_ptr->num_of_redirections*2);
+	    command_node_ptr->num_of_arguments -=
+		(command_node_ptr->num_of_redirections * 2);
 	}
 	ret = 0;
     }
@@ -361,22 +417,26 @@ char execute_io_redirections(Node * cmd_line_data)
 	ret = 1;
     } else {
 	//compare all the line elemnts with the i/o redirections
-	for (int index = 0; index < cmd_line_data->num_of_arguments + cmd_line_data->num_of_redirections;
-	     index++) {
+	for (int index = 0;
+	     index <
+	     cmd_line_data->num_of_arguments +
+	     cmd_line_data->num_of_redirections; index++) {
 	    if ((strcmp(cmd_line_data->Data[index], ">") == 0)) {
 
 		ret =
 		    execute_output_redirection(cmd_line_data->Data
 					       [index + 1]);
+		cmd_line_data->Data[index] = NULL;
 	    } else if ((strcmp(cmd_line_data->Data[index], "2>") == 0)) {
 		ret =
 		    execute_error_redirection(cmd_line_data->Data
 					      [index + 1]);
-
+		cmd_line_data->Data[index] = NULL;
 	    } else if ((strcmp(cmd_line_data->Data[index], "<") == 0)) {
 		ret =
 		    execute_input_redirection(cmd_line_data->Data
 					      [index + 1]);
+		cmd_line_data->Data[index] = NULL;
 	    } else {
 		continue;
 	    }
@@ -386,6 +446,36 @@ char execute_io_redirections(Node * cmd_line_data)
     return ret;
 
 }
+
+char execute_env_var(Node * cmd_line_data)
+{
+    char ret = 1;
+    char env_var_name[32] = { 0 };
+    if (NULL == cmd_line_data) {
+	ret = 1;
+    } else {
+	char arg_index = 0;
+	//printing the arguments the user entered
+	for (arg_index = 0;
+	     arg_index < cmd_line_data->num_of_arguments; arg_index++) {
+	    if (cmd_line_data->Data[arg_index][0] == '$') {
+		for (int i = 0; i < strlen(cmd_line_data->Data[arg_index]);
+		     i++) {
+		    env_var_name[i] =
+			cmd_line_data->Data[arg_index][i + 1];
+		}
+		strcpy(cmd_line_data->Data[arg_index],
+		       getenv(env_var_name));
+
+	    } else {
+
+	    }
+	    ret = 0;
+	}
+    }
+    return ret;
+}
+
 char my_echo(Node * cmd_line_data)
 {
     char ret = 1;
@@ -442,7 +532,7 @@ char my_pwd(void)
 	printf("size exceeds max path size current directory\n");
 	ret = 1;
     } else {
-	printf("%s\n", current_path);
+	printf("%s", current_path);
 	/*now freeing the allocated array */
 	free(current_path);
 	current_path = NULL;
